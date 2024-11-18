@@ -92,7 +92,7 @@ class SimiKD(nn.Module):
         loss_vv = self.attkd_loss(vv_list)
         loss_deit = self.get_loss_deit(stu_deit_logits, outputs_t)
 
-        return loss_deit, loss_base, loss_qk, loss_vv, outputs
+        return loss_deit, loss_base, outputs, loss_qk, loss_vv
 
     def attkd_loss(self, relation):
         loss = []
