@@ -510,9 +510,7 @@ class VisionTransformer(nn.Module):
         x = self.pos_drop(x + self.pos_embed)
         qk_list = []
         vv_list = []
-        # 收集中间层特征
         for _, block in enumerate(self.blocks):
-            # 如果当前block索引在feat_loc中,则收集特征
             # if self.feat_loc and i in self.feat_loc:
             x, qk, vv = block(x, return_relation=True)
             qk_list.append(qk)
