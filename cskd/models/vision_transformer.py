@@ -529,12 +529,9 @@ class VisionTransformer(nn.Module):
         x, qk_list, vv_list = self.forward_features(x)
         if self.head_dist is not None:
             x, x_dist = self.head(x[0]), self.head_dist(x[1])
-            # 训练和推理阶段返回不同结果
             if self.training and not torch.jit.is_scripting():
-                # during inference, return the average of both classifier predictions
                 return x, x_dist, qk_list, vv_list
             else:
-                # 推理时返回两个分类头预测的平均
                 return (x + x_dist) / 2
         else:
             x = self.head(x)

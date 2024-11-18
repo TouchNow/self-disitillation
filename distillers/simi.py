@@ -88,18 +88,18 @@ class SimiKD(nn.Module):
         loss_base = self.criterion(outputs, labels)
         if self.cfg.deit_loss_type == "none":  # no distill loss
             return loss_base
-        loss_qk = self.kd_loss(qk_list)
-        loss_vv = self.kd_loss(vv_list)
+        loss_qk = self.attkd_loss(qk_list)
+        loss_vv = self.attkd_loss(vv_list)
         loss_deit = self.get_loss_deit(stu_deit_logits, outputs_t)
 
         return loss_deit, loss_base, loss_qk, loss_vv, outputs
 
-    def kd_loss(self, relation):
+    def attkd_loss(self, relation):
         loss = []
         for i in range(len(relation) - 1):
             if i in self.cfg.feat_loc:
-                temp = nn.KLDivLoss(reduction="none")(relation[i].log(), relation[-1])
-                loss.append(temp.sum(-1).mean())
+                temp = nn.KLDivLoss(reduction="none")(relation[i].log(), relation[-1]).sum(-1).mean()
+                loss.append(temp)
         return sum(loss)
 
     def get_mse_loss(self, feat_s, feat_t):
