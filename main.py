@@ -62,15 +62,21 @@ def train(
                 outputs_t = teacher_model(inputs)
                 if not isinstance(outputs_t, torch.Tensor):
                     outputs_t, feat_t = outputs_t
-            loss_deit, loss_base, loss_qk, loss_vv, outputs = distiller(inputs, target, outputs_t)
+            loss_deit, loss_base, outputs, loss_qk, loss_vv = distiller(inputs, target, outputs_t)
             loss_deit = cfg.deit_loss_weight * loss_deit
-            loss = loss_deit + loss_base
+            loss = loss_deit + loss_base + loss_qk + loss_vv
+            # print("loss_deit", loss_deit)
+            # print("loss_base", loss_base)
+            print("loss_qk", loss_qk)
+            print("loss_vv", loss_vv)
         loss_value = loss.item()
         if not math.isfinite(loss_value):
             logger.error(f"loss is {loss_value}, stop training")
             sys.exit(1)
         optimizer.zero_grad()
-        is_second_order = hasattr(optimizer, "is_second_order") and optimizer.is_second_order
+        # print(hasattr(optimizer, "is_second_order"))
+        # print(optimizer.is_second_order)
+        is_second_order = hasattr(optimizer, "is_second_order") and optimizer.is_second_order  # False
         loss_scaler(
             loss,
             optimizer,

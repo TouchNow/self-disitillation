@@ -98,8 +98,8 @@ class SimiKD(nn.Module):
         loss = []
         for i in range(len(relation) - 1):
             if i in self.cfg.feat_loc:
-                temp = nn.KLDivLoss(reduction="none")(relation[i].log(), relation[-1]).sum(-1).mean()
-                loss.append(temp)
+                temp = nn.KLDivLoss(reduction="none")(relation[i].log(), relation[-1]).sum(-1)
+                loss.append(temp.mean())
         return sum(loss)
 
     def get_mse_loss(self, feat_s, feat_t):
