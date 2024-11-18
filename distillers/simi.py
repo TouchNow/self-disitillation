@@ -5,6 +5,8 @@ import torch.nn as nn
 from cskd.config import ConfigBase
 from timm.models.layers import trunc_normal_
 from distillers.registry import register_distiller
+from cskd.models.vision_transformer import Block
+from copy import deepcopy
 
 __all__ = ["SimiKD"]
 
@@ -78,8 +80,8 @@ class SimiKD(nn.Module):
         cfg: ConfigBase,
         model: nn.Module,
         criterion: nn.Module,
-        # feat_s=None,
-        # feat_t=None,
+        feat_s=None,
+        feat_t=None,
     ):
         super().__init__()
         self.cfg = cfg
@@ -87,37 +89,49 @@ class SimiKD(nn.Module):
         self.criterion = criterion
         # self.teacher = teacher
         # blk_num = len(feat_t)
+        # self.projector = deepcopy(model.blocks[-1])
+        # self.head = deepcopy(model.head)
+        # self.norm = deepcopy(model.norm)
         # self.projector = nn.ModuleDict()
         # for i in range(blk_num):
-        #     set_module_dict(self.projector, i, Alignment(feat_s[i], feat_t[i]))
+        #     set_module_dict(self.projector, i, deepcopy(model.blocks[-1]))
         # self.projector.apply(init_weights)
 
-    def forward(self, inputs, labels, outputs_t):
+    def forward(self, inputs, labels, outputs_t, feat_s=None, feat_t=None):
         # mse_losses = []
         # cosine_losses = []
-        middle_loss_base = []
-        middle_loss_deit = []
+        # feat_t = feat_t.flatten(2).transpose(1, 2)
+        # feat_t = F.interpolate(feat_t, size=feat_s.shape[1:], mode="bilinear")
+        # feat_t = self.projector(feat_t)
+        # middle_loss_base = []
+        # middle_loss_deit = []
         outputs = self.model(inputs)
         if not isinstance(outputs, torch.Tensor):
-            outputs, stu_deit_logits, middle_x, middle_dist = outputs
+            outputs, stu_deit_logits, qk_list, vv_list = outputs
         loss_base = self.criterion(outputs, labels)
         if self.cfg.deit_loss_type == "none":  # no distill loss
             return loss_base
-        for i in range(len(middle_x)):
-            middle_loss_base.append(self.criterion(middle_x[i], labels))
-            middle_loss_deit.append(self.get_loss_deit(middle_dist[i], outputs_t))
         # for i in range(len(feat_s)):
         #     align_feat_s = get_module_dict(self.projector, i)(feat_s[i], feat_t[i])
         # if i in [0, 1]:
         #     mse_losses.append(self.get_mse_loss(align_feat_s, feat_t[i]))
         # else:
         # cosine_losses.append(self.get_cosine_loss(align_feat_s, feat_t[i]))
+        loss_qk = self.kd_loss(qk_list)
+        loss_vv = self.kd_loss(vv_list)
         loss_deit = self.get_loss_deit(stu_deit_logits, outputs_t)
         # loss_mse = sum(mse_losses)
         # loss_cosine = sum(cosine_losses)
-        middle_loss_base = sum(middle_loss_base)
-        middle_loss_deit = sum(middle_loss_deit)
-        return loss_deit, loss_base, middle_loss_base, middle_loss_deit, outputs
+
+        return loss_deit, loss_base, loss_qk, loss_vv, outputs
+
+    def kd_loss(self, relation):
+        loss = []
+        for i in range(len(relation) - 1):
+            if i in self.cfg.feat_loc:
+                temp = nn.KLDivLoss(reduction="none")(relation[i].log(), relation[-1])
+                loss.append(temp.sum(-1).mean())
+        return sum(loss)
 
     def get_mse_loss(self, feat_s, feat_t):
         feat_t = feat_t.flatten(1)

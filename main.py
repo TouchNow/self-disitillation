@@ -62,24 +62,24 @@ def train(
                 outputs_t = teacher_model(inputs)
                 if not isinstance(outputs_t, torch.Tensor):
                     outputs_t, feat_t = outputs_t
-            loss_deit, loss_base, middle_loss_base, middle_loss_deit, outputs = (
-                distiller(inputs, target, outputs_t)
+            loss_deit, loss_base, loss_qk, loss_vv, outputs = distiller(
+                inputs, target, outputs_t
             )
 
             loss_deit = cfg.deit_loss_weight * loss_deit
             # loss_mse = cfg.mse_loss_weight * loss_mse
             # loss_cosine = cfg.simi_loss_weight * loss_cosine
-            loss = loss_deit + loss_base + middle_loss_base + middle_loss_deit
+            loss = loss_deit + loss_base 
         loss_value = loss.item()
+        print(loss_value)
         if not math.isfinite(loss_value):
             logger.error(f"loss is {loss_value}, stop training")
             sys.exit(1)
-
         optimizer.zero_grad()
         is_second_order = (
             hasattr(optimizer, "is_second_order") and optimizer.is_second_order
         )
-
+        print(111111)
         loss_scaler(
             loss,
             optimizer,
@@ -308,7 +308,6 @@ def main():
             if local_rank == 0:
                 logger.warning("no patch embed")
 
-    # model.to(local_rank)
     model.to(local_rank)
     model_ema = None
     if cfg.model_ema:
@@ -440,8 +439,7 @@ def main():
     for epoch in range(start_epoch, cfg.epochs):
         train_loader.sampler.set_epoch(epoch)
         # fmt: off
-        train(local_rank, cfg, epoch, distiller, teacher_model, train_loader, mixup_func, criterion, loss_scaler,
-              optimizer, model_ema, train_loss_meter, train_acc1_meter, train_acc5_meter, train_writer)
+        train(local_rank, cfg, epoch, distiller, teacher_model, train_loader, mixup_func, criterion, loss_scaler,optimizer, model_ema, train_loss_meter, train_acc1_meter, train_acc5_meter, train_writer)
         lr_scheduler.step(epoch)
         acc1, acc5 = evaluate(local_rank, cfg, train_loader, val_loader, epoch, distiller.module.model, val_loss_meter,
                               val_acc1_meter, val_acc5_meter, val_writer)

@@ -288,7 +288,7 @@ class Attention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
-    def forward(self, x):
+    def forward(self, x, return_relation=False):
         B, N, C = x.shape
         qkv = (
             self.qkv(x)
@@ -299,12 +299,16 @@ class Attention(nn.Module):
 
         attn = (q @ k.transpose(-2, -1)) * self.scale
         attn = attn.softmax(dim=-1)
+        temp = attn
         attn = self.attn_drop(attn)
 
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
-        return x
+        if return_relation:
+            return x, temp, ((v @ v.transpose(-2, -1)) * self.scale).softmax(dim=-1)
+        else:
+            return x
 
 
 class Block(nn.Module):
@@ -341,10 +345,15 @@ class Block(nn.Module):
             drop=drop,
         )
 
-    def forward(self, x):
-        x = x + self.drop_path(self.attn(self.norm1(x)))
+    def forward(self, x, return_relation=False):
+        x, qk, vv = self.attn(self.norm1(x), return_relation=True)
+        # x = x + self.drop_path(self.attn(self.norm1(x)))
+        x = x + self.drop_path(x)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
-        return x
+        if return_relation:
+            return x, qk, vv
+        else:
+            return x
 
 
 class VisionTransformer(nn.Module):
@@ -477,8 +486,6 @@ class VisionTransformer(nn.Module):
 
         self.init_weights(weight_init)
         self.finetune = finetune
-        self.middle_x = []
-        self.middle_dist = []
 
     def init_weights(self, mode=""):
         assert mode in ("jax", "jax_nlhb", "nlhb", "")
@@ -527,46 +534,41 @@ class VisionTransformer(nn.Module):
 
     def forward_features(self, x):
         x = self.patch_embed(x)
-        cls_token = self.cls_token.expand(x.shape[0], -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+        cls_token = self.cls_token.expand(
+            x.shape[0], -1, -1
+        )  # stole cls_tokens impl from Phil Wang, thanks
         if self.dist_token is None:
             x = torch.cat((cls_token, x), dim=1)
         else:
-            x = torch.cat((cls_token, self.dist_token.expand(x.shape[0], -1, -1), x), dim=1)
+            x = torch.cat(
+                (cls_token, self.dist_token.expand(x.shape[0], -1, -1), x), dim=1
+            )
         x = self.pos_drop(x + self.pos_embed)
-
+        qk_list=[]
+        vv_list =[]
         # 收集中间层特征
-        feat = []
-        for i, block in enumerate(self.blocks, start=1):
-            x = block(x)
+        for _, block in enumerate(self.blocks, start=1):
             # 如果当前block索引在feat_loc中,则收集特征
-            if self.feat_loc and i in self.feat_loc:
-                feat.append(x)
+            # if self.feat_loc and i in self.feat_loc:
+            x, qk, vv = block(x, return_relation=True)
+            qk_list.append(qk)
+            vv_list.append(vv)
+            # x = block(x)
 
         x = self.norm(x)
-        for i in range(len(feat)):
-            feat[i] = self.norm(feat[i])
         if self.dist_token is None:
             return self.pre_logits(x[:, 0])
         else:
-            return (x[:, 0], x[:, 1]), feat
+            return (x[:, 0], x[:, 1]), qk_list, vv_list
 
     def forward(self, x):
-        if self.feat_loc:
-            x, feat = self.forward_features(x)
-        else:
-            x = self.forward_features(x)
+        x, qk_list, vv_list = self.forward_features(x)
         if self.head_dist is not None:
-            # 获取两个分类头的预测
             x, x_dist = self.head(x[0]), self.head_dist(x[1])
-            # 处理中间特征
-            if self.feat_loc:
-                self.middle_x = [self.head(f[:, 0]) for f in feat]
-                self.middle_dist = [self.head_dist(f[:, 1]) for f in feat]
-
             # 训练和推理阶段返回不同结果
             if self.training and not torch.jit.is_scripting():
                 # during inference, return the average of both classifier predictions
-                return x, x_dist, self.middle_x, self.middle_dist
+                return x, x_dist, qk_list, vv_list
             else:
                 # 推理时返回两个分类头预测的平均
                 return (x + x_dist) / 2
