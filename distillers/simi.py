@@ -75,12 +75,7 @@ class Alignment(nn.Module):
 
 @register_distiller
 class SimiKD(nn.Module):
-    def __init__(
-        self,
-        cfg: ConfigBase,
-        model: nn.Module,
-        criterion: nn.Module,
-    ):
+    def __init__(self, cfg: ConfigBase, model: nn.Module, criterion: nn.Module):
         super().__init__()
         self.cfg = cfg
         self.model = model
@@ -130,9 +125,7 @@ class SimiKD(nn.Module):
                 / stu_deit_logits.numel()
             )
         elif self.cfg.deit_loss_type == "hard":
-            loss_deit = F.cross_entropy(
-                stu_deit_logits, tea_global_logits.argmax(dim=1)
-            )
+            loss_deit = F.cross_entropy(stu_deit_logits, tea_global_logits.argmax(dim=1))
         else:
             raise NotImplementedError(self.cfg.deit_loss_type)
         return loss_deit

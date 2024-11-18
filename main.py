@@ -66,13 +66,11 @@ def train(
             loss_deit = cfg.deit_loss_weight * loss_deit
             loss = loss_deit + loss_base
         loss_value = loss.item()
-        print(loss_value)
         if not math.isfinite(loss_value):
             logger.error(f"loss is {loss_value}, stop training")
             sys.exit(1)
         optimizer.zero_grad()
         is_second_order = hasattr(optimizer, "is_second_order") and optimizer.is_second_order
-        print(111111)
         loss_scaler(
             loss,
             optimizer,
@@ -292,11 +290,7 @@ def main():
     model.to(local_rank)
     model_ema = None
     if cfg.model_ema:
-        model_ema = ModelEma(
-            model,
-            decay=cfg.model_ema_decay,
-            device="cpu" if cfg.model_ema_on_cpu else "",
-        )
+        model_ema = ModelEma(model, decay=cfg.model_ema_decay, device="cpu" if cfg.model_ema_on_cpu else "")
     criterion = LabelSmoothingCrossEntropy()
     if cfg.use_mixup:
         criterion = SoftTargetCrossEntropy()
@@ -314,10 +308,7 @@ def main():
         if local_rank == 0:
             logger.info(f"create teacher model: {cfg.teacher_model}")
         teacher_model = create_model(
-            cfg.teacher_model,
-            pretrained=False,
-            num_classes=train_dataset.num_classes,
-            global_pool="avg",
+            cfg.teacher_model, pretrained=False, num_classes=train_dataset.num_classes, global_pool="avg"
         )
         if cfg.teacher_weight.startswith("https"):
             checkpoint = torch.hub.load_state_dict_from_url(cfg.teacher_weight, map_location="cpu", check_hash=True)
