@@ -98,13 +98,6 @@ class SimiKD(nn.Module):
         # self.projector.apply(init_weights)
 
     def forward(self, inputs, labels, outputs_t, feat_s=None, feat_t=None):
-        # mse_losses = []
-        # cosine_losses = []
-        # feat_t = feat_t.flatten(2).transpose(1, 2)
-        # feat_t = F.interpolate(feat_t, size=feat_s.shape[1:], mode="bilinear")
-        # feat_t = self.projector(feat_t)
-        # middle_loss_base = []
-        # middle_loss_deit = []
         outputs = self.model(inputs)
         if not isinstance(outputs, torch.Tensor):
             outputs, stu_deit_logits, qk_list, vv_list = outputs

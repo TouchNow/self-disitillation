@@ -65,10 +65,7 @@ def train(
             loss_deit, loss_base, loss_qk, loss_vv, outputs = distiller(
                 inputs, target, outputs_t
             )
-
             loss_deit = cfg.deit_loss_weight * loss_deit
-            # loss_mse = cfg.mse_loss_weight * loss_mse
-            # loss_cosine = cfg.simi_loss_weight * loss_cosine
             loss = loss_deit + loss_base 
         loss_value = loss.item()
         print(loss_value)
