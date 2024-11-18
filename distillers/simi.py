@@ -75,10 +75,10 @@ class Alignment(nn.Module):
 
 @register_distiller
 class SimiKD(nn.Module):
-    def __init__(self, cfg: ConfigBase, model: nn.Module, criterion: nn.Module):
+    def __init__(self, cfg, model, criterion, feat_t):
         super().__init__()
         self.cfg = cfg
-        self.model = model
+        self.model = model  # block
         self.criterion = criterion
 
     def forward(self, inputs, labels, outputs_t, feat_s=None, feat_t=None):

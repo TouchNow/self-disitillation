@@ -19,6 +19,7 @@ from cskd import build_dataset
 from cskd import CSKDLoss
 from cskd.models import create_model
 from cskd.sampler import RASampler
+from copy import deepcopy
 from cskd.metric import AverageMeter, Accuracy
 from cskd.utils import (
     load_config_from_file,
@@ -322,16 +323,13 @@ def main():
         teacher_model.to(local_rank)
         teacher_model.requires_grad_(False)
         teacher_model.eval()
-    # randn_data = torch.randn(2, 3, cfg.input_size, cfg.input_size).to(local_rank)
-    # _, feat_t = teacher_model(randn_data)
+    randn_data = torch.randn(2, 3, cfg.input_size, cfg.input_size).to(local_rank)
+    _, feat_t = teacher_model(randn_data)  # torch.Size([2, 3024, 7, 7])
     # _, _, feat_s = model(randn_data)
-    # criterion = CSKDLoss(
-    #     cfg,
-    #     criterion,
-    #     teacher_model
-    # )
+    # criterion = CSKDLoss(cfg, criterion, teacher_model)
+
     Distiller = get_distiller(args.distiller)
-    distiller = Distiller(cfg, model, criterion)
+    distiller = Distiller(cfg, deepcopy(model.blocks[-1]), criterion, feat_t)
     distiller.to(local_rank)
     # model_without_ddp = model
     distiller = nn.parallel.DistributedDataParallel(distiller, device_ids=[local_rank], find_unused_parameters=True)

@@ -441,6 +441,9 @@ class RegNet(nn.Module):
         # torch.Size([2, 3024, 7, 7])
         # torch.Size([2, 1000])
         x, feat = self.forward_features(x)
+        for i in range(len(feat)):
+            print(feat[i].shape)
+        assert 1 == 0
         x = list(self.children())[-1](x)
         return x, feat[-1]
         # N, C, H, W = x.shape   N H W C   →   NHW C 1 1
