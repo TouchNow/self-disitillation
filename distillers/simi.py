@@ -80,22 +80,11 @@ class SimiKD(nn.Module):
         cfg: ConfigBase,
         model: nn.Module,
         criterion: nn.Module,
-        feat_s=None,
-        feat_t=None,
     ):
         super().__init__()
         self.cfg = cfg
         self.model = model
         self.criterion = criterion
-        # self.teacher = teacher
-        # blk_num = len(feat_t)
-        # self.projector = deepcopy(model.blocks[-1])
-        # self.head = deepcopy(model.head)
-        # self.norm = deepcopy(model.norm)
-        # self.projector = nn.ModuleDict()
-        # for i in range(blk_num):
-        #     set_module_dict(self.projector, i, deepcopy(model.blocks[-1]))
-        # self.projector.apply(init_weights)
 
     def forward(self, inputs, labels, outputs_t, feat_s=None, feat_t=None):
         outputs = self.model(inputs)
@@ -104,17 +93,9 @@ class SimiKD(nn.Module):
         loss_base = self.criterion(outputs, labels)
         if self.cfg.deit_loss_type == "none":  # no distill loss
             return loss_base
-        # for i in range(len(feat_s)):
-        #     align_feat_s = get_module_dict(self.projector, i)(feat_s[i], feat_t[i])
-        # if i in [0, 1]:
-        #     mse_losses.append(self.get_mse_loss(align_feat_s, feat_t[i]))
-        # else:
-        # cosine_losses.append(self.get_cosine_loss(align_feat_s, feat_t[i]))
         loss_qk = self.kd_loss(qk_list)
         loss_vv = self.kd_loss(vv_list)
         loss_deit = self.get_loss_deit(stu_deit_logits, outputs_t)
-        # loss_mse = sum(mse_losses)
-        # loss_cosine = sum(cosine_losses)
 
         return loss_deit, loss_base, loss_qk, loss_vv, outputs
 
@@ -133,12 +114,6 @@ class SimiKD(nn.Module):
     def get_cosine_loss(self, feat_s, feat_t):
         feat_t = feat_t.flatten(1)
         return 1 - F.cosine_similarity(feat_s, feat_t, dim=1).mean()
-        # norm_s = feat_s / feat_s.norm(p=2, dim=-1, keepdim=True)
-        # norm_t = feat_t / feat_t.norm(p=2, dim=-1, keepdim=True)
-        # angle_loss = (
-        #     1 - (norm_s * norm_t).sum(dim=-1, keepdim=True)
-        # ).sum() / feat_s.size(0)
-        # return angle_loss
 
     def get_loss_deit(self, stu_deit_logits, tea_global_logits):
         # deit loss

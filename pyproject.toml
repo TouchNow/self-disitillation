@@ -1,0 +1,3 @@
+[tool.black]
+line-length = 120    # 设置为 150 列
+skip-string-normalization = true 
