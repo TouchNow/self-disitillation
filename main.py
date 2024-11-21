@@ -62,24 +62,15 @@ def train(
                 outputs_t = teacher_model(inputs)
                 if not isinstance(outputs_t, torch.Tensor):
                     outputs_t, feat_t = outputs_t
-            loss_deit, loss_base, loss_qk, loss_vv, outputs = distiller(
-                inputs, target, outputs_t
-            )
-
+            loss_deit, loss_base, loss_qk, loss_vv, outputs = distiller(inputs, target, outputs_t)
             loss_deit = cfg.deit_loss_weight * loss_deit
-            # loss_mse = cfg.mse_loss_weight * loss_mse
-            # loss_cosine = cfg.simi_loss_weight * loss_cosine
-            loss = loss_deit + loss_base 
+            loss = loss_deit + loss_base
         loss_value = loss.item()
-        print(loss_value)
         if not math.isfinite(loss_value):
             logger.error(f"loss is {loss_value}, stop training")
             sys.exit(1)
         optimizer.zero_grad()
-        is_second_order = (
-            hasattr(optimizer, "is_second_order") and optimizer.is_second_order
-        )
-        print(111111)
+        is_second_order = hasattr(optimizer, "is_second_order") and optimizer.is_second_order
         loss_scaler(
             loss,
             optimizer,
@@ -130,13 +121,9 @@ def train(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--config", type=str, required=True, help="config file")
-    parser.add_argument(
-        "--eval-only", action="store_true", default=False, help="eval only"
-    )
+    parser.add_argument("--eval-only", action="store_true", default=False, help="eval only")
     parser.add_argument("--ckpt", type=str, default="", help="ckpt to eval")
-    parser.add_argument(
-        "--distiller", type=str, default="simikd", help="distill method"
-    )
+    parser.add_argument("--distiller", type=str, default="simikd", help="distill method")
     args = parser.parse_args()
     config = load_config_from_file(args.config)
     cfg = config.instance()
@@ -213,11 +200,7 @@ def main():
     )
     val_loader = data.DataLoader(
         val_dataset,
-        batch_size=(
-            cfg.val_batch_size // cfg.world_size
-            if cfg.dist_eval
-            else cfg.val_batch_size
-        ),
+        batch_size=(cfg.val_batch_size // cfg.world_size if cfg.dist_eval else cfg.val_batch_size),
         sampler=val_sampler,
         num_workers=cfg.val_loader_workers,
         pin_memory=cfg.pin_memory,
@@ -243,17 +226,13 @@ def main():
         if local_rank == 0:
             logger.info("finetune")
         if cfg.finetune.startswith("https"):
-            checkpoint = torch.hub.load_state_dict_from_url(
-                cfg.finetune, map_location="cpu", check_hash=True
-            )
+            checkpoint = torch.hub.load_state_dict_from_url(cfg.finetune, map_location="cpu", check_hash=True)
         else:
             checkpoint = torch.load(cfg.finetune, map_location="cpu")
         checkpoint_model = checkpoint["model"]
         state_dict = model.state_dict()
         for k in ["head.weight", "head.bias", "head_dist.weight", "head_dist.bias"]:
-            if k in checkpoint_model and (
-                not k in state_dict or checkpoint_model[k].shape != state_dict[k].shape
-            ):
+            if k in checkpoint_model and (not k in state_dict or checkpoint_model[k].shape != state_dict[k].shape):
                 if local_rank == 0:
                     logger.info(f"Removing key {k} from pretrained checkpoint")
                 del checkpoint_model[k]
@@ -311,11 +290,7 @@ def main():
     model.to(local_rank)
     model_ema = None
     if cfg.model_ema:
-        model_ema = ModelEma(
-            model,
-            decay=cfg.model_ema_decay,
-            device="cpu" if cfg.model_ema_on_cpu else "",
-        )
+        model_ema = ModelEma(model, decay=cfg.model_ema_decay, device="cpu" if cfg.model_ema_on_cpu else "")
     criterion = LabelSmoothingCrossEntropy()
     if cfg.use_mixup:
         criterion = SoftTargetCrossEntropy()
@@ -333,15 +308,10 @@ def main():
         if local_rank == 0:
             logger.info(f"create teacher model: {cfg.teacher_model}")
         teacher_model = create_model(
-            cfg.teacher_model,
-            pretrained=False,
-            num_classes=train_dataset.num_classes,
-            global_pool="avg",
+            cfg.teacher_model, pretrained=False, num_classes=train_dataset.num_classes, global_pool="avg"
         )
         if cfg.teacher_weight.startswith("https"):
-            checkpoint = torch.hub.load_state_dict_from_url(
-                cfg.teacher_weight, map_location="cpu", check_hash=True
-            )
+            checkpoint = torch.hub.load_state_dict_from_url(cfg.teacher_weight, map_location="cpu", check_hash=True)
         else:
             ckpt_name = os.path.basename(cfg.teacher_weight)
             ckpt_dir = os.path.dirname(cfg.teacher_weight)
@@ -362,9 +332,7 @@ def main():
     distiller = Distiller(cfg, model, criterion)
     distiller.to(local_rank)
     # model_without_ddp = model
-    distiller = nn.parallel.DistributedDataParallel(
-        distiller, device_ids=[local_rank], find_unused_parameters=True
-    )
+    distiller = nn.parallel.DistributedDataParallel(distiller, device_ids=[local_rank], find_unused_parameters=True)
     model_without_ddp = distiller.module
 
     if args.eval_only:
@@ -438,12 +406,36 @@ def main():
 
     for epoch in range(start_epoch, cfg.epochs):
         train_loader.sampler.set_epoch(epoch)
-        # fmt: off
-        train(local_rank, cfg, epoch, distiller, teacher_model, train_loader, mixup_func, criterion, loss_scaler,optimizer, model_ema, train_loss_meter, train_acc1_meter, train_acc5_meter, train_writer)
+        train(
+            local_rank,
+            cfg,
+            epoch,
+            distiller,
+            teacher_model,
+            train_loader,
+            mixup_func,
+            criterion,
+            loss_scaler,
+            optimizer,
+            model_ema,
+            train_loss_meter,
+            train_acc1_meter,
+            train_acc5_meter,
+            train_writer,
+        )
         lr_scheduler.step(epoch)
-        acc1, acc5 = evaluate(local_rank, cfg, train_loader, val_loader, epoch, distiller.module.model, val_loss_meter,
-                              val_acc1_meter, val_acc5_meter, val_writer)
-        # fmt: on
+        acc1, acc5 = evaluate(
+            local_rank,
+            cfg,
+            train_loader,
+            val_loader,
+            epoch,
+            distiller.module.model,
+            val_loss_meter,
+            val_acc1_meter,
+            val_acc5_meter,
+            val_writer,
+        )
         if local_rank == 0:
             if acc1 > best_val_acc:
                 best_val_acc = acc1
@@ -463,9 +455,7 @@ def main():
             }
 
             if epoch % cfg.save_latest_checkpoint_interval == 0:
-                if save_checkpoint(
-                    cfg.log_dir, "latest", checkpoint
-                ) and save_checkpoint(
+                if save_checkpoint(cfg.log_dir, "latest", checkpoint) and save_checkpoint(
                     cfg.log_dir, "latest_student", checkpoint_student
                 ):
                     logger.info("successfully saved the checkpoint to latest")
