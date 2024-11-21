@@ -442,7 +442,7 @@ class RegNet(nn.Module):
         # torch.Size([2, 1000])
         x, feat = self.forward_features(x)
         x = list(self.children())[-1](x)
-        return x, feat[-1]
+        return x, feat
         # N, C, H, W = x.shape   N H W C   →   NHW C 1 1
         # x = x.permute(0, 2, 3, 1).reshape(-1, C, 1, 1)
         # x = list(self.children())[-1](x).reshape(N, H, W, -1).permute(0, 3, 1, 2)

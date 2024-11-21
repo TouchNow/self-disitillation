@@ -6,7 +6,6 @@ import numpy as np
 import torch
 import torch.distributed as dist
 from torch import nn
-import torch.nn.functional as F
 from torch.cuda import amp
 from torch.utils import data
 from torch.utils.tensorboard import SummaryWriter
@@ -32,43 +31,12 @@ from cskd.utils import (
 )
 
 
-def get_loss_deit(cfg, stu_deit_logits, tea_global_logits):
-    # deit loss
-    if cfg.deit_loss_type == "soft":
-        T = cfg.deit_tau
-        loss_deit = (
-            F.kl_div(
-                F.log_softmax(stu_deit_logits / T, dim=1),
-                F.log_softmax(tea_global_logits / T, dim=1),
-                reduction="sum",
-                log_target=True,
-            )
-            * (T * T)
-            / stu_deit_logits.numel()
-        )
-    elif cfg.deit_loss_type == "hard":
-        loss_deit = F.cross_entropy(stu_deit_logits, tea_global_logits.argmax(dim=1))
-    else:
-        raise NotImplementedError(cfg.deit_loss_type)
-    return loss_deit
-
-
-def attkd_loss(cfg, att_list, branch_att):
-    loss = []
-    for i in range(len(att_list) - 1):
-        if i in cfg.feat_loc:
-            temp = nn.KLDivLoss(reduction="none")(att_list[i].log(), branch_att).sum(-1)
-            loss.append(temp.mean())
-    return sum(loss)
-
-
 def train(
     local_rank,
     cfg,
     epoch,
     distiller,
     teacher_model,
-    branch_model,
     loader,
     mixup_func,
     criterion,
@@ -83,7 +51,7 @@ def train(
     logger = get_logger(cfg)
     if local_rank == 0:
         logger.info("start training...")
-    distiller.module.train()
+    distiller.module.model.train()
     for step, (inputs, target) in enumerate(loader):
         iteration = epoch * len(loader) + step
         inputs = inputs.to(local_rank, non_blocking=True)
@@ -95,13 +63,11 @@ def train(
                 outputs_t = teacher_model(inputs)
                 if not isinstance(outputs_t, torch.Tensor):
                     outputs_t, feat_t = outputs_t
-                branch_qk, branch_vv = branch_model(target, outputs_t, feat_t[-1])
-            outputs, x_dist, qk_list, vv_list = distiller(inputs)
-            loss_deit = cfg.deit_loss_weight * get_loss_deit(cfg, x_dist, outputs_t)
-            loss_base = criterion(outputs, target)
-            loss_qk = cfg.qk_loss_weight * attkd_loss(cfg, qk_list, branch_qk[0])
-            loss_vv = cfg.vv_loss_weight * attkd_loss(cfg, vv_list, branch_vv[0])
+            loss_deit, loss_base, outputs, loss_qk, loss_vv = distiller(inputs, target, outputs_t)
+            loss_deit = cfg.deit_loss_weight * loss_deit
             loss = loss_deit + loss_base + loss_qk + loss_vv
+            print("loss_qk", loss_qk)
+            print("loss_vv", loss_vv)
         loss_value = loss.item()
         if not math.isfinite(loss_value):
             logger.error(f"loss is {loss_value}, stop training")
@@ -117,7 +83,7 @@ def train(
         )
 
         if model_ema is not None:
-            model_ema.update(distiller)
+            model_ema.update(distiller.module.model)
 
         loss_meter.update(loss_value)
         if not cfg.use_mixup:
@@ -167,7 +133,12 @@ def main():
 
     # init distributed process
     local_rank = int(os.environ["LOCAL_RANK"])
-    dist.init_process_group(backend=cfg.backend, init_method=cfg.dist_url, world_size=cfg.world_size, rank=local_rank)
+    dist.init_process_group(
+        backend=cfg.backend,
+        init_method=cfg.dist_url,
+        world_size=cfg.world_size,
+        rank=local_rank,
+    )
     torch.cuda.set_device(local_rank)
     if local_rank == 0:
         cfg.print()
@@ -243,7 +214,6 @@ def main():
 
     if local_rank == 0:
         logger.info("start load model")
-    branch_model = create_model(cfg.branch_model, pretrained=False, num_classes=train_dataset.num_classes)
     model = create_model(
         cfg.model,
         pretrained=False,
@@ -355,24 +325,19 @@ def main():
         teacher_model.eval()
     randn_data = torch.randn(2, 3, cfg.input_size, cfg.input_size).to(local_rank)
     _, feat_t = teacher_model(randn_data)  # torch.Size([2, 3024, 7, 7])
-    feat_dim = feat_t[-1].shape[1]
     # _, _, feat_s = model(randn_data)
     # criterion = CSKDLoss(cfg, criterion, teacher_model)
 
     Distiller = get_distiller(args.distiller)
-    branch_model = Distiller(cfg, branch_model, criterion, feat_dim, branch_model.embed_dim)
-    branch_model.load_state_dict(load_checkpoint(cfg.branch_weight, "best")["model"])
-    branch_model.to(local_rank)
-    branch_model.requires_grad_(False)
-    branch_model.eval()
-    distiller = model
+    distiller = Distiller(cfg, deepcopy(model.blocks[-1]), criterion, feat_t)
     distiller.to(local_rank)
+    # model_without_ddp = model
     distiller = nn.parallel.DistributedDataParallel(distiller, device_ids=[local_rank], find_unused_parameters=True)
     model_without_ddp = distiller.module
 
     if args.eval_only:
-        # checkpoint = torch.load(args.ckpt, map_location="cpu")
-        # model_without_ddp.load_state_dict(checkpoint["model"])
+        checkpoint = torch.load(args.ckpt, map_location="cpu")
+        model_without_ddp.load_state_dict(checkpoint["model"])
         acc1, acc5 = evaluate(
             local_rank,
             cfg,
@@ -380,12 +345,10 @@ def main():
             val_loader,
             0,
             model,
-            branch_model,
             val_loss_meter,
             val_acc1_meter,
             val_acc5_meter,
             val_writer,
-            teacher_model,
         )
         return
     n_parameters = sum(p.numel() for p in distiller.parameters() if p.requires_grad)
@@ -449,7 +412,6 @@ def main():
             epoch,
             distiller,
             teacher_model,
-            branch_model,
             train_loader,
             mixup_func,
             criterion,
@@ -468,7 +430,7 @@ def main():
             train_loader,
             val_loader,
             epoch,
-            distiller,
+            distiller.module.model,
             val_loss_meter,
             val_acc1_meter,
             val_acc5_meter,
@@ -548,9 +510,12 @@ def evaluate(
     for step, (inputs, target) in enumerate(loader):
         inputs = inputs.to(local_rank, non_blocking=True)
         target = target.to(local_rank, non_blocking=True)
+        if teacher_model is not None:
+            with torch.no_grad():
+                _, feat_t = teacher_model(inputs)
         with amp.autocast():
-            outputs, _, _ = model(inputs)
-            # outputs = model(target, outputs_t, feat_t[-1])
+            # outputs = model(inputs)
+            outputs = model(feat_t[-1])
             loss = criterion(outputs, target)
 
         loss_meter.update(loss.item())

@@ -9,7 +9,7 @@ class Config(ConfigBase):
     exp_name = os.path.splitext(os.path.basename(__file__))[0]
 
     # model
-    model = "deit_tiny_distilled_patch16_224"
+    model = "deit_tiny_distilled_patch16_224"  # deit_tiny_distilled_patch16_224
     input_size = 224
     dropout = 0.0
     drop_path = 0.0
@@ -21,6 +21,10 @@ class Config(ConfigBase):
     teacher_model = "regnety_160"
     # teacher_weight = "https://dl.fbaipublicfiles.com/deit/regnety_160-a5fe301d.pth"
     teacher_weight = "/mnt/home/chendingyao/pretrained/pretrained_kd/regnety_160.pth"
+    branch_model = "deit_tiny_distilled_patch16_224_depth1"
+    branch_weight = (
+        "/mnt/home/chendingyao/code/CSKD-main/branch/imagenet/deit_tiny_distilled_patch16_224_depth1/simi_tiny"
+    )
     deit_loss_type = "hard"  # none, soft, hard
     deit_loss_weight = 1.0
     deit_tau = 1.0
@@ -28,7 +32,9 @@ class Config(ConfigBase):
     simikd_loss_type = "hard"
     mse_loss_weight = 1.0
     simi_loss_weight = 1.0
-    feat_loc = [3, 6, 9]
+    qk_loss_weight = 2.0
+    vv_loss_weight = 2.0
+    feat_loc = [3, 6, 9, 12]
 
     # optimizer
     opt = "adamw"
@@ -84,7 +90,7 @@ class Config(ConfigBase):
 
     # train
     continue_training = True
-    epochs = 300
+    epochs = 100  # 300
     train_batch_size = 512  # 1024
     val_batch_size = 512  # 1024
     weight_decay = 0.05

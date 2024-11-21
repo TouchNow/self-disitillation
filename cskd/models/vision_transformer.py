@@ -269,6 +269,12 @@ default_cfgs = {
         crop_pct=0.875,
         interpolation="bilinear",
     ),
+    "deit_tiny_distilled_patch16_224_depth1": _cfg(
+        url="https://dl.fbaipublicfiles.com/deit/deit_tiny_distilled_patch16_224-b40b3cf7.pth",
+        mean=IMAGENET_DEFAULT_MEAN,
+        std=IMAGENET_DEFAULT_STD,
+        classifier=("head", "head_dist"),
+    ),
 }
 
 
@@ -408,13 +414,15 @@ class VisionTransformer(nn.Module):
         norm_layer = norm_layer or partial(nn.LayerNorm, eps=1e-6)
         act_layer = act_layer or nn.GELU
         self.feat_loc = feat_loc
-        self.patch_embed = embed_layer(
-            img_size=img_size,
-            patch_size=patch_size,
-            in_chans=in_chans,
-            embed_dim=embed_dim,
-        )
-        num_patches = self.patch_embed.num_patches
+        if depth != 1:
+            self.patch_embed = embed_layer(
+                img_size=img_size,
+                patch_size=patch_size,
+                in_chans=in_chans,
+                embed_dim=embed_dim,
+            )
+        # num_patches = self.patch_embed.num_patches
+        num_patches = 196
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.dist_token = nn.Parameter(torch.zeros(1, 1, embed_dim)) if distilled else None
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + self.num_tokens, embed_dim))
@@ -500,7 +508,8 @@ class VisionTransformer(nn.Module):
             self.head_dist = nn.Linear(self.embed_dim, self.num_classes) if num_classes > 0 else nn.Identity()
 
     def forward_features(self, x):
-        x = self.patch_embed(x)
+        if len(x.shape) == 4:
+            x = self.patch_embed(x)
         # stole cls_tokens impl from Phil Wang, thanks
         cls_token = self.cls_token.expand(x.shape[0], -1, -1)
         if self.dist_token is None:
@@ -530,7 +539,7 @@ class VisionTransformer(nn.Module):
             if self.training and not torch.jit.is_scripting():
                 return x, x_dist, qk_list, vv_list
             else:
-                return (x + x_dist) / 2
+                return (x + x_dist) / 2, qk_list, vv_list
         else:
             x = self.head(x)
         return x
@@ -1088,6 +1097,21 @@ def deit_base_patch16_384(pretrained=False, **kwargs):
     """
     model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, **kwargs)
     model = _create_vision_transformer("deit_base_patch16_384", pretrained=pretrained, **model_kwargs)
+    return model
+
+
+@register_model
+def deit_tiny_distilled_patch16_224_depth1(pretrained=False, **kwargs):
+    """DeiT-tiny distilled model @ 224x224 from paper (https://arxiv.org/abs/2012.12877).
+    ImageNet-1k weights from https://github.com/facebookresearch/deit.
+    """
+    model_kwargs = dict(patch_size=16, embed_dim=192, depth=1, num_heads=3, **kwargs)
+    model = _create_vision_transformer(
+        "deit_tiny_distilled_patch16_224_depth1",
+        pretrained=pretrained,
+        distilled=True,
+        **model_kwargs,
+    )
     return model
 
 
